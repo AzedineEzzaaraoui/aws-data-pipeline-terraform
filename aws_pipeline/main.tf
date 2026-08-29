@@ -7,11 +7,11 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "azedine-tfstate-backend"
-    key            = "aws_pipeline/terraform.tfstate"
-    region         = "eu-central-1"
-    dynamodb_table = "terraform-locks"
-    encrypt        = true
+    bucket       = "azedine-tfstate-backend"
+    key          = "aws_pipeline/terraform.tfstate"
+    region       = "eu-central-1"
+    use_lockfile = true
+    encrypt      = true
   }
 }
 
@@ -237,8 +237,8 @@ resource "aws_iam_policy" "transform_s3_policy" {
     Version = "2012-10-17",
     Statement = [
       {
-        Effect   = "Allow",
-        Action   = ["s3:ListBucket"],
+        Effect = "Allow",
+        Action = ["s3:ListBucket"],
         Resource = aws_s3_bucket.data_lake.arn,
         Condition = {
           StringLike = { "s3:prefix" = ["raw/*"] }
