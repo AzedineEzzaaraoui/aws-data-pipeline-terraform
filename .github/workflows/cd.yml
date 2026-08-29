@@ -1,0 +1,53 @@
+name: Terraform CD
+
+on:
+  workflow_run:
+    workflows: ["Terraform CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  cd:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+
+    defaults:
+      run:
+        working-directory: ./aws_pipeline
+
+    # Optionnel mais recommandé : exige une approbation manuelle avant apply.
+    # Configure l'environnement "production" dans Settings > Environments
+    # avec un ou plusieurs reviewers requis.
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Terraform Init
+        run: terraform init
+
+      # Récupère le plan exact généré et validé par le CI — garantit
+      # que l'apply n'exécute jamais un plan différent de celui relu.
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: aws_pipeline
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
