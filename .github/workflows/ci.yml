@@ -13,6 +13,9 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-state-aws_pipeline
+      cancel-in-progress: false
 
     defaults:
       run:

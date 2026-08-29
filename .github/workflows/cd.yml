@@ -10,6 +10,9 @@ jobs:
   cd:
     runs-on: ubuntu-latest
     if: github.event.workflow_run.conclusion == 'success'
+    concurrency:
+      group: terraform-state-aws_pipeline
+      cancel-in-progress: false
 
     defaults:
       run:
