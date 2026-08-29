@@ -1,0 +1,109 @@
+name: Terraform Drift Detection
+
+on:
+  schedule:
+    # Tous les jours à 06h00 UTC (07h00/08h00 heure Maroc selon la saison)
+    - cron: "0 6 * * *"
+  workflow_dispatch: # permet aussi un déclenchement manuel depuis l'onglet Actions
+
+jobs:
+  drift-detection:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./aws_pipeline
+
+    permissions:
+      contents: read
+      issues: write # nécessaire pour créer/mettre à jour l'issue de drift
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan (detect drift)
+        id: plan
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -no-color -out=tfplan > plan_output.txt 2>&1
+          echo "exitcode=$?" >> "$GITHUB_OUTPUT"
+          cat plan_output.txt
+
+      # Codes de sortie terraform plan -detailed-exitcode :
+      #   0 = aucun changement (pas de drift)
+      #   1 = erreur
+      #   2 = changements détectés (drift)
+
+      - name: Read plan output
+        if: steps.plan.outputs.exitcode == '2'
+        id: read_plan
+        run: |
+          {
+            echo 'plan<<EOF'
+            cat aws_pipeline/plan_output.txt
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or update drift issue
+        if: steps.plan.outputs.exitcode == '2'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = "⚠️ Drift Terraform détecté sur aws_pipeline";
+            const planOutput = `${{ steps.read_plan.outputs.plan }}`.slice(0, 60000);
+            const body = [
+              "Une dérive d'infrastructure a été détectée entre le state Terraform et les ressources réelles sur AWS.",
+              "",
+              "**Run concerné :** " + `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+              "",
+              "<details><summary>Sortie de terraform plan</summary>",
+              "",
+              "```",
+              planOutput,
+              "```",
+              "</details>"
+            ].join("\n");
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: ["terraform-drift"]
+            });
+
+            if (issues.length > 0) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues[0].number,
+                body: body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ["terraform-drift"]
+              });
+            }
+
+      - name: Fail job if drift detected
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          echo "Drift détecté — voir l'issue créée/mise à jour dans l'onglet Issues."
+          exit 1
